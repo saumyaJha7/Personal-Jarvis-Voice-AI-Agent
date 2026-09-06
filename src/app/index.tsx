@@ -1,6 +1,6 @@
-import { StatusBar } from "expo-status-bar";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -10,6 +10,8 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useRouter } from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import Animated, { FadeInDown, FadeOutUp } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -22,6 +24,7 @@ import {
   jarvisSpacing,
   jarvisTheme,
 } from "@/constants/jarvis-theme";
+import { useAuth } from "@/context/auth-context";
 import { useJarvisConversation } from "@/hooks/use-jarvis-conversation";
 
 function getHeaderStatus(
@@ -36,6 +39,9 @@ function getHeaderStatus(
 
 export default function Index() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const { user, isLoading, logout } = useAuth();
+
   const {
     conversation,
     isStarting,
@@ -52,6 +58,21 @@ export default function Index() {
   const [textInput, setTextInput] = useState("");
   const [isMuted, setIsMuted] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    if (!isLoading && !user) {
+      router.replace("/login" as any);
+    }
+  }, [user, isLoading, router]);
+
+  if (isLoading || !user) {
+    return (
+      <View style={[styles.root, { justifyContent: "center", alignItems: "center" }]}>
+        <JarvisBackground />
+        <ActivityIndicator size="large" color={jarvisTheme.cyan} />
+      </View>
+    );
+  }
 
   const isConnected = conversation.status === "connected";
   const canStart = conversation.status === "disconnected" && !isStarting;
@@ -82,6 +103,11 @@ export default function Index() {
     setKeyboardVisible(true);
   };
 
+  const handleLogout = async () => {
+    await logout();
+    router.replace("/login" as any);
+  };
+
   return (
     <View style={styles.root}>
       <JarvisBackground compact={compactOrb || keyboardVisible} />
@@ -105,19 +131,27 @@ export default function Index() {
           <View style={styles.header}>
             <View>
               <Text style={styles.brand}>Jarvis</Text>
-              <Text style={styles.tagline}>Personal assistant</Text>
-            </View>
-            <View
-              style={[styles.headerPill, isConnected && styles.headerPillLive]}
-            >
-              <View
-                style={[styles.headerDot, isConnected && styles.headerDotLive]}
-              />
-              <Text style={styles.headerStatus}>
-                {getHeaderStatus(isConnected, isStarting, conversation.status)}
+              <Text style={styles.tagline} numberOfLines={1}>
+                {user.email}
               </Text>
             </View>
+            <View style={styles.headerRight}>
+              <View
+                style={[styles.headerPill, isConnected && styles.headerPillLive]}
+              >
+                <View
+                  style={[styles.headerDot, isConnected && styles.headerDotLive]}
+                />
+                <Text style={styles.headerStatus}>
+                  {getHeaderStatus(isConnected, isStarting, conversation.status)}
+                </Text>
+              </View>
+              <Pressable style={styles.logoutBtn} onPress={handleLogout}>
+                <Text style={styles.logoutText}>Logout</Text>
+              </Pressable>
+            </View>
           </View>
+
 
           {(error || conversation.message) && (
             <Animated.View
@@ -251,8 +285,28 @@ const styles = StyleSheet.create({
     color: jarvisTheme.textMuted,
     fontSize: 12,
     letterSpacing: 0.2,
+    maxWidth: 130,
+  },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  logoutBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: jarvisRadius.pill,
+    backgroundColor: jarvisTheme.errorBg,
+    borderWidth: 1,
+    borderColor: jarvisTheme.errorBorder,
+  },
+  logoutText: {
+    color: "#fca5a5",
+    fontSize: 11,
+    fontWeight: "600",
   },
   headerPill: {
+
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
