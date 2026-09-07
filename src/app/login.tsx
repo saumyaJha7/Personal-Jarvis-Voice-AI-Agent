@@ -81,7 +81,7 @@ export default function LoginScreen() {
             </View>
             <Text style={styles.title}>Jarvis AI</Text>
             <Text style={styles.subtitle}>
-              Enter your credentials to access your personal assistant session.
+              Enter credentials to access your personal AI assistant.
             </Text>
           </Animated.View>
 
@@ -97,7 +97,7 @@ export default function LoginScreen() {
 
           <Animated.View entering={FadeInDown.delay(150).duration(400)} style={styles.form}>
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Email Address</Text>
+              <Text style={styles.label}>Email</Text>
               <TextInput
                 style={styles.input}
                 value={email}
@@ -131,16 +131,10 @@ export default function LoginScreen() {
               {submitting ? (
                 <ActivityIndicator color={jarvisTheme.text} />
               ) : (
-                <Text style={styles.submitButtonText}>Login / Access Account</Text>
+                <Text style={styles.submitButtonText}>Login</Text>
               )}
             </Pressable>
           </Animated.View>
-
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>
-              Powered by SQLite Local Database • Encrypted Session
-            </Text>
-          </View>
         </View>
       </KeyboardAvoidingView>
     </View>

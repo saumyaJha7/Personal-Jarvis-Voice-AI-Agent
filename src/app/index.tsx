@@ -131,9 +131,6 @@ export default function Index() {
           <View style={styles.header}>
             <View>
               <Text style={styles.brand}>Jarvis</Text>
-              <Text style={styles.tagline} numberOfLines={1}>
-                {user.email}
-              </Text>
             </View>
             <View style={styles.headerRight}>
               <View
