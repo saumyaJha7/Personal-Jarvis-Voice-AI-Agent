@@ -74,12 +74,13 @@ export default function Index() {
     );
   }
 
+  const isHod = user.role === "hod";
   const isConnected = conversation.status === "connected";
   const canStart = conversation.status === "disconnected" && !isStarting;
   const showEndCall = isConnected;
   const showComposer = isConnected && keyboardVisible;
   const hasMessages = messages.length > 0;
-  const showOrb = !keyboardVisible;
+  const showOrb = isHod && !keyboardVisible;
   const compactOrb = isConnected && hasMessages;
 
   const handleOrbPress = () => {
@@ -107,6 +108,42 @@ export default function Index() {
     await logout();
     router.replace("/login" as any);
   };
+
+  if (!isHod) {
+    return (
+      <View style={styles.root}>
+        <JarvisBackground />
+        <StatusBar style="light" />
+        <View
+          style={[
+            styles.screen,
+            {
+              paddingTop: insets.top + jarvisSpacing.md,
+              paddingBottom: Math.max(insets.bottom, jarvisSpacing.lg),
+              paddingLeft: Math.max(insets.left, jarvisSpacing.screen),
+              paddingRight: Math.max(insets.right, jarvisSpacing.screen),
+            },
+          ]}
+        >
+          <View style={styles.header}>
+            <View>
+              <Text style={styles.brand}>Jarvis</Text>
+            </View>
+            <View style={styles.headerRight}>
+              <Pressable style={styles.logoutBtn} onPress={handleLogout}>
+                <Text style={styles.logoutText}>Logout</Text>
+              </Pressable>
+            </View>
+          </View>
+
+          <View style={styles.studentContainer}>
+            <Text style={styles.studentTitle}>student login</Text>
+            <Text style={styles.studentSubtitle}>Logged in as {user.email}</Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.root}>
@@ -403,5 +440,21 @@ const styles = StyleSheet.create({
     color: jarvisTheme.text,
     fontSize: 14,
     fontWeight: "600",
+  },
+  studentContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: jarvisSpacing.sm,
+  },
+  studentTitle: {
+    color: jarvisTheme.text,
+    fontSize: 22,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+  },
+  studentSubtitle: {
+    color: jarvisTheme.textMuted,
+    fontSize: 14,
   },
 });

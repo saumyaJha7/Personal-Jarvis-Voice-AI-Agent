@@ -1,9 +1,12 @@
 import * as SQLite from "expo-sqlite";
 import { Platform } from "react-native";
 
+export type UserRole = "hod" | "student";
+
 export interface UserSession {
   id: number;
   email: string;
+  role: UserRole;
 }
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
@@ -33,16 +36,26 @@ export async function initDatabase(): Promise<void> {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'student',
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
       );
       CREATE TABLE IF NOT EXISTS active_session (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         user_id INTEGER NOT NULL,
         email TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'student',
         logged_in_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users (id)
       );
     `);
+
+    // Migration fallback for existing database instances
+    try {
+      await db.execAsync("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'student';");
+    } catch {}
+    try {
+      await db.execAsync("ALTER TABLE active_session ADD COLUMN role TEXT NOT NULL DEFAULT 'student';");
+    } catch {}
   } catch (error) {
     console.error("Failed to initialize SQLite database:", error);
     throw error;
@@ -60,29 +73,36 @@ export async function authenticateUser(
     throw new Error("Email and password are required.");
   }
 
+  const isHodAttempt = email === "hod@gmail.com";
+  if (isHodAttempt && password !== "1234") {
+    throw new Error("Invalid password for HOD account.");
+  }
+
+  const role: UserRole = isHodAttempt ? "hod" : "student";
+
   // Web Fallback handling
   if (Platform.OS === "web") {
     const usersStr = typeof window !== "undefined" ? localStorage.getItem("jarvis_users") : null;
-    const users: Record<string, { id: number; email: string; password: string }> = usersStr
+    const users: Record<string, { id: number; email: string; password: string; role: UserRole }> = usersStr
       ? JSON.parse(usersStr)
       : {};
 
     if (users[email]) {
-      if (users[email].password !== password) {
-        throw new Error("Invalid password for this account.");
+      if (isHodAttempt && users[email].password !== password) {
+        throw new Error("Invalid password for HOD account.");
       }
-      const session = { id: users[email].id, email: users[email].email };
+      const session: UserSession = { id: users[email].id, email: users[email].email, role };
       if (typeof window !== "undefined") {
         localStorage.setItem("jarvis_active_session", JSON.stringify(session));
       }
       return session;
     } else {
       const newId = Date.now();
-      users[email] = { id: newId, email, password };
+      users[email] = { id: newId, email, password, role };
       if (typeof window !== "undefined") {
         localStorage.setItem("jarvis_users", JSON.stringify(users));
       }
-      const session = { id: newId, email };
+      const session: UserSession = { id: newId, email, role };
       if (typeof window !== "undefined") {
         localStorage.setItem("jarvis_active_session", JSON.stringify(session));
       }
@@ -96,30 +116,35 @@ export async function authenticateUser(
     throw new Error("Database unavailable.");
   }
 
-  const existingUser = await db.getFirstAsync<{ id: number; email: string; password: string }>(
-    "SELECT id, email, password FROM users WHERE LOWER(email) = ?",
+  const existingUser = await db.getFirstAsync<{ id: number; email: string; password: string; role?: string }>(
+    "SELECT id, email, password, role FROM users WHERE LOWER(email) = ?",
     [email]
   );
 
   if (existingUser) {
-    if (existingUser.password !== password) {
-      throw new Error("Invalid password for this account.");
+    if (isHodAttempt && existingUser.password !== password) {
+      throw new Error("Invalid password for HOD account.");
     }
 
     await db.runAsync(
-      "INSERT OR REPLACE INTO active_session (id, user_id, email) VALUES (1, ?, ?)",
-      [existingUser.id, existingUser.email]
+      "UPDATE users SET role = ?, password = ? WHERE id = ?",
+      [role, password, existingUser.id]
     );
 
-    return { id: existingUser.id, email: existingUser.email };
+    await db.runAsync(
+      "INSERT OR REPLACE INTO active_session (id, user_id, email, role) VALUES (1, ?, ?, ?)",
+      [existingUser.id, existingUser.email, role]
+    );
+
+    return { id: existingUser.id, email: existingUser.email, role };
   } else {
     await db.runAsync(
-      "INSERT INTO users (email, password) VALUES (?, ?)",
-      [email, password]
+      "INSERT INTO users (email, password, role) VALUES (?, ?, ?)",
+      [email, password, role]
     );
 
-    const newUser = await db.getFirstAsync<{ id: number; email: string }>(
-      "SELECT id, email FROM users WHERE LOWER(email) = ?",
+    const newUser = await db.getFirstAsync<{ id: number; email: string; role: string }>(
+      "SELECT id, email, role FROM users WHERE LOWER(email) = ?",
       [email]
     );
 
@@ -128,11 +153,11 @@ export async function authenticateUser(
     }
 
     await db.runAsync(
-      "INSERT OR REPLACE INTO active_session (id, user_id, email) VALUES (1, ?, ?)",
-      [newUser.id, newUser.email]
+      "INSERT OR REPLACE INTO active_session (id, user_id, email, role) VALUES (1, ?, ?, ?)",
+      [newUser.id, newUser.email, role]
     );
 
-    return { id: newUser.id, email: newUser.email };
+    return { id: newUser.id, email: newUser.email, role };
   }
 }
 
@@ -140,19 +165,23 @@ export async function getCurrentSession(): Promise<UserSession | null> {
   if (Platform.OS === "web") {
     if (typeof window === "undefined") return null;
     const sessionStr = localStorage.getItem("jarvis_active_session");
-    return sessionStr ? JSON.parse(sessionStr) : null;
+    if (!sessionStr) return null;
+    const parsed = JSON.parse(sessionStr);
+    const role: UserRole = parsed.role ?? (parsed.email === "hod@gmail.com" ? "hod" : "student");
+    return { ...parsed, role };
   }
 
   try {
     const db = await getDb();
     if (!db) return null;
 
-    const session = await db.getFirstAsync<{ user_id: number; email: string }>(
-      "SELECT user_id, email FROM active_session WHERE id = 1"
+    const session = await db.getFirstAsync<{ user_id: number; email: string; role?: string }>(
+      "SELECT user_id, email, role FROM active_session WHERE id = 1"
     );
 
     if (!session) return null;
-    return { id: session.user_id, email: session.email };
+    const role: UserRole = (session.role as UserRole) ?? (session.email === "hod@gmail.com" ? "hod" : "student");
+    return { id: session.user_id, email: session.email, role };
   } catch (error) {
     console.error("Error reading active session from SQLite:", error);
     return null;
