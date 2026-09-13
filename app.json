@@ -13,7 +13,7 @@
         "NSMicrophoneUsageDescription": "This app uses the microphone to record audio."
       },
       "supportsTablet": true,
-      "bundleIdentifier": "YOUR.BUNDLE.ID",
+      "bundleIdentifier": "com.saumyajha.jarvisagent",
       "bitcode": false
     },
     "android": {
@@ -34,7 +34,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "YOUR.PACKAGE.ID",
+      "package": "com.saumyajha.jarvisagent",
       "softwareKeyboardLayoutMode": "resize"
     },
     "web": {
@@ -54,7 +54,6 @@
         }
       ],
       "@config-plugins/react-native-webrtc",
-      "@livekit/react-native-expo-plugin",
       "@livekit/react-native-expo-plugin",
       "expo-web-browser",
       "expo-sqlite"
