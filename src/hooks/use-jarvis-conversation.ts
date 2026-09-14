@@ -3,6 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
 import { useSharedValue } from "react-native-reanimated";
 
+import { addHodTask } from "@/services/db";
+
 type DisconnectDetails =
   | { reason: "user" }
   | { reason: "agent" }
@@ -34,6 +36,77 @@ function getDisconnectMessage(details: DisconnectDetails) {
     return "Session ended by Jarvis.";
   }
   return null;
+}
+
+function parseHour(timeStr: string): number {
+  if (!timeStr) return 9;
+  if (timeStr.includes("T")) {
+    const date = new Date(timeStr);
+    if (!isNaN(date.getTime())) {
+      return date.getHours() + date.getMinutes() / 60;
+    }
+  }
+  const match = timeStr.match(/(\d{1,2}):?(\d{2})?\s*(AM|PM)?/i);
+  if (match) {
+    let hours = parseInt(match[1], 10);
+    const minutes = match[2] ? parseInt(match[2], 10) : 0;
+    const ampm = match[3]?.toUpperCase();
+    if (ampm === "PM" && hours < 12) hours += 12;
+    if (ampm === "AM" && hours === 12) hours = 0;
+    return hours + minutes / 60;
+  }
+  return 9;
+}
+
+function determineSlotId(timeStr: string): 1 | 2 | 3 | 4 {
+  const hour = parseHour(timeStr);
+  if (hour < 10.5) return 1;
+  if (hour < 12.5) return 2;
+  if (hour < 14.5) return 3;
+  return 4;
+}
+
+async function handleCalendarToolPayload(toolName: string, data: any) {
+  if (!toolName || !toolName.toLowerCase().includes("calendar") || !data) return;
+  try {
+    const items = Array.isArray(data)
+      ? data
+      : data?.items || data?.events || [data];
+
+    for (const item of items) {
+      if (!item || typeof item !== "object") continue;
+      const title = item.summary || item.title || item.name || "Calendar Event";
+      const startStr = item.start?.dateTime || item.start?.time || item.startTime || "";
+      const description = item.description || "Synced from Google Calendar";
+      const location = item.location || "HOD Office";
+      const slotId = determineSlotId(startStr);
+
+      await addHodTask(slotId, title, description, location);
+    }
+  } catch (err) {
+    console.error("Error parsing Google Calendar payload:", err);
+  }
+}
+
+function extractAndSaveFromText(text: string) {
+  if (!text) return;
+  const timeMatch = text.match(/(\d{1,2}:?\d{0,2}\s*(?:AM|PM)?)/i);
+  const lower = text.toLowerCase();
+  if (
+    timeMatch &&
+    (lower.includes("add") ||
+      lower.includes("schedul") ||
+      lower.includes("block") ||
+      lower.includes("calen") ||
+      lower.includes("event") ||
+      lower.includes("meet"))
+  ) {
+    const timeStr = timeMatch[1];
+    const slotId = determineSlotId(timeStr);
+    const titleMatch = text.match(/(?:meeting|event|lecture|task|session)\s+([a-zA-Z0-9\s]+)/i);
+    const title = titleMatch ? titleMatch[1].trim() : "Scheduled Calendar Task";
+    void addHodTask(slotId, title, "Synced via Jarvis Voice", "HOD Office");
+  }
 }
 
 export function useJarvisConversation() {
@@ -68,6 +141,13 @@ export function useJarvisConversation() {
     onConnect: () => {
       setError(null);
       setIsStarting(false);
+
+      // Auto-Sync: Request Jarvis to check/sync today's Google Calendar events on connect
+      setTimeout(() => {
+        try {
+          conversation.sendUserMessage("Check my Google Calendar for today and list all scheduled events.");
+        } catch {}
+      }, 1200);
     },
     onDisconnect: (details) => {
       setActiveTool(null);
@@ -97,18 +177,28 @@ export function useJarvisConversation() {
         payload.role === "user" ||
         ("source" in payload && payload.source === "user");
       appendMessage(isUser ? "user" : "agent", payload.message);
+
+      if (!isUser && payload.message) {
+        extractAndSaveFromText(payload.message);
+      }
     },
     onAgentToolRequest: ({ tool_name }) => {
       setActiveTool(getToolLabel(tool_name));
     },
-    onAgentToolResponse: () => {
+    onAgentToolResponse: (props: any) => {
       setActiveTool(null);
+      if (props?.tool_name && props?.tool_response) {
+        void handleCalendarToolPayload(props.tool_name, props.tool_response);
+      }
     },
-    onMCPToolCall: (props) => {
+    onMCPToolCall: (props: any) => {
       if (props.state === "loading" || props.state === "awaiting_approval") {
         setActiveTool(getToolLabel(props.tool_name));
       } else {
         setActiveTool(null);
+        if (props.result) {
+          void handleCalendarToolPayload(props.tool_name, props.result);
+        }
       }
     },
   });

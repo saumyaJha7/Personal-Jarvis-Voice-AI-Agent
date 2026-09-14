@@ -1,10 +1,13 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Keyboard,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
+  RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -26,6 +29,7 @@ import {
 } from "@/constants/jarvis-theme";
 import { useAuth } from "@/context/auth-context";
 import { useJarvisConversation } from "@/hooks/use-jarvis-conversation";
+import { addHodTask, getTodayHodTasks, HodTask, timeStrToMinutes } from "@/services/db";
 
 function getHeaderStatus(
   isConnected: boolean,
@@ -58,12 +62,74 @@ export default function Index() {
   const [textInput, setTextInput] = useState("");
   const [isMuted, setIsMuted] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [hodTasks, setHodTasks] = useState<HodTask[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newStartTime, setNewStartTime] = useState("10:00 AM");
+  const [newEndTime, setNewEndTime] = useState("11:30 AM");
+  const [newLocation, setNewLocation] = useState("HOD Office");
+  const [newDescription, setNewDescription] = useState("");
+
+  const fetchHodTasks = useCallback(async (targetDate?: Date) => {
+    try {
+      const dateToFetch = targetDate || selectedDate;
+      const tasks = await getTodayHodTasks(dateToFetch);
+      setHodTasks(tasks);
+    } catch (err) {
+      console.error("Failed to load HOD tasks:", err);
+    }
+  }, [selectedDate]);
 
   useEffect(() => {
     if (!isLoading && !user) {
       router.replace("/login" as any);
+    } else if (user && user.role !== "hod") {
+      void fetchHodTasks(selectedDate);
     }
-  }, [user, isLoading, router]);
+  }, [user, isLoading, router, fetchHodTasks, selectedDate]);
+
+  const handlePrevDay = () => {
+    const prev = new Date(selectedDate);
+    prev.setDate(prev.getDate() - 1);
+    setSelectedDate(prev);
+  };
+
+  const handleNextDay = () => {
+    const next = new Date(selectedDate);
+    next.setDate(next.getDate() + 1);
+    setSelectedDate(next);
+  };
+
+  const handleTodayReset = () => {
+    setSelectedDate(new Date());
+  };
+
+  const handleSaveNewTask = async () => {
+    if (!newTitle.trim()) return;
+    const startMin = timeStrToMinutes(newStartTime);
+    const endMin = timeStrToMinutes(newEndTime);
+    await addHodTask(
+      newStartTime,
+      newTitle.trim(),
+      newDescription.trim(),
+      newLocation.trim() || "HOD Office",
+      selectedDate,
+      startMin,
+      endMin
+    );
+    setShowAddModal(false);
+    setNewTitle("");
+    setNewDescription("");
+    await fetchHodTasks(selectedDate);
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchHodTasks(selectedDate);
+    setRefreshing(false);
+  };
 
   if (isLoading || !user) {
     return (
@@ -110,6 +176,14 @@ export default function Index() {
   };
 
   if (!isHod) {
+    const isToday = selectedDate.toDateString() === new Date().toDateString();
+    const dateFormatted = selectedDate.toLocaleDateString("en-US", {
+      weekday: "long",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+
     return (
       <View style={styles.root}>
         <JarvisBackground />
@@ -128,6 +202,7 @@ export default function Index() {
           <View style={styles.header}>
             <View>
               <Text style={styles.brand}>Jarvis</Text>
+              <Text style={styles.studentBadgeText}>STUDENT PORTAL</Text>
             </View>
             <View style={styles.headerRight}>
               <Pressable style={styles.logoutBtn} onPress={handleLogout}>
@@ -136,10 +211,129 @@ export default function Index() {
             </View>
           </View>
 
-          <View style={styles.studentContainer}>
-            <Text style={styles.studentTitle}>student login</Text>
-            <Text style={styles.studentSubtitle}>Logged in as {user.email}</Text>
-          </View>
+          <ScrollView
+            style={styles.flex}
+            contentContainerStyle={styles.studentScrollContent}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                tintColor={jarvisTheme.cyan}
+              />
+            }
+          >
+            <View style={styles.scheduleHeaderBanner}>
+              <View style={styles.bannerTopRow}>
+                <View>
+                  <Text style={styles.scheduleBannerTitle}>
+                    {isToday ? "HOD Today's Schedule" : "HOD Schedule"}
+                  </Text>
+                  <Text style={styles.scheduleBannerSubtitle}>{dateFormatted}</Text>
+                </View>
+
+                <View style={styles.bannerActionsRight}>
+                  {!isToday ? (
+                    <Pressable style={styles.todayResetBtn} onPress={handleTodayReset}>
+                      <Text style={styles.todayResetText}>Today</Text>
+                    </Pressable>
+                  ) : null}
+
+                  <Pressable style={styles.addTaskBtn} onPress={() => setShowAddModal(true)}>
+                    <Text style={styles.addTaskBtnText}>+ Add Task</Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              <View style={styles.dateNavRow}>
+                <Pressable style={styles.dateNavBtn} onPress={handlePrevDay}>
+                  <Text style={styles.dateNavBtnText}>◀ Prev</Text>
+                </Pressable>
+
+                <View style={styles.dateDisplayPill}>
+                  <Text style={styles.dateDisplayIcon}>📅</Text>
+                  <Text style={styles.dateDisplayText}>
+                    {selectedDate.toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                    })}
+                  </Text>
+                </View>
+
+                <Pressable style={styles.dateNavBtn} onPress={handleNextDay}>
+                  <Text style={styles.dateNavBtnText}>Next ▶</Text>
+                </Pressable>
+              </View>
+
+              <View style={styles.workingHoursPill}>
+                <Text style={styles.workingHoursText}>
+                  ⏰ Live Calendar & Working Hours Timeline
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.slotsList}>
+              {hodTasks.map((task) => {
+                const isAvailable = task.isAvailable || task.status === "Available";
+                return (
+                  <View
+                    key={String(task.id)}
+                    style={[
+                      styles.slotCard,
+                      isAvailable ? styles.slotCardAvailable : styles.slotCardOccupied,
+                    ]}
+                  >
+                    <View style={styles.slotCardHeader}>
+                      <View
+                        style={[
+                          styles.slotBadge,
+                          isAvailable && styles.slotBadgeAvailable,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.slotBadgeText,
+                            isAvailable && styles.slotBadgeTextAvailable,
+                          ]}
+                        >
+                          {task.startTime} – {task.endTime}
+                        </Text>
+                      </View>
+
+                      <View
+                        style={[
+                          styles.taskStatusPill,
+                          isAvailable ? styles.statusPillFree : styles.statusPillBusy,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.taskStatusText,
+                            isAvailable ? styles.statusTextFree : styles.statusTextBusy,
+                          ]}
+                        >
+                          {isAvailable ? "Free Slot" : "Occupied"}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <Text style={styles.taskTitle}>{task.title}</Text>
+                    {task.description ? (
+                      <Text style={styles.taskDescription}>{task.description}</Text>
+                    ) : null}
+
+                    {task.location ? (
+                      <View style={styles.locationContainer}>
+                        <Text style={styles.locationText}>
+                          📍 {task.location}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </View>
+          </ScrollView>
         </View>
       </View>
     );
@@ -287,6 +481,88 @@ export default function Index() {
           </View>
         </View>
       </KeyboardAvoidingView>
+
+      <Modal
+        visible={showAddModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowAddModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>
+              Add Task for {selectedDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+            </Text>
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Task Title (e.g. Guest Lecture / Seminar)"
+              placeholderTextColor={jarvisTheme.textMuted}
+              value={newTitle}
+              onChangeText={setNewTitle}
+            />
+
+            <View style={styles.modalRow}>
+              <View style={styles.flex1}>
+                <Text style={styles.modalLabel}>Start Time</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="10:00 AM"
+                  placeholderTextColor={jarvisTheme.textMuted}
+                  value={newStartTime}
+                  onChangeText={setNewStartTime}
+                />
+              </View>
+              <View style={styles.flex1}>
+                <Text style={styles.modalLabel}>End Time</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="11:30 AM"
+                  placeholderTextColor={jarvisTheme.textMuted}
+                  value={newEndTime}
+                  onChangeText={setNewEndTime}
+                />
+              </View>
+            </View>
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Location (e.g. HOD Office or Hall 2)"
+              placeholderTextColor={jarvisTheme.textMuted}
+              value={newLocation}
+              onChangeText={setNewLocation}
+            />
+
+            <TextInput
+              style={[styles.modalInput, styles.modalTextArea]}
+              placeholder="Description (Optional)"
+              placeholderTextColor={jarvisTheme.textMuted}
+              value={newDescription}
+              onChangeText={setNewDescription}
+              multiline
+            />
+
+            <View style={styles.modalBtnRow}>
+              <Pressable
+                style={styles.modalCancelBtn}
+                onPress={() => setShowAddModal(false)}
+              >
+                <Text style={styles.modalCancelBtnText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.modalSaveBtn,
+                  !newTitle.trim() && styles.sendButtonDisabled,
+                ]}
+                onPress={handleSaveNewTask}
+                disabled={!newTitle.trim()}
+              >
+                <Text style={styles.modalSaveBtnText}>Save Task</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -441,20 +717,286 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
   },
-  studentContainer: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: jarvisSpacing.sm,
-  },
-  studentTitle: {
-    color: jarvisTheme.text,
-    fontSize: 22,
+  studentBadgeText: {
+    color: jarvisTheme.cyan,
+    fontSize: 10,
     fontWeight: "700",
-    letterSpacing: 0.5,
+    letterSpacing: 1,
+    marginTop: 1,
   },
-  studentSubtitle: {
-    color: jarvisTheme.textMuted,
+  studentScrollContent: {
+    paddingBottom: jarvisSpacing.xxl,
+    gap: jarvisSpacing.lg,
+  },
+  scheduleHeaderBanner: {
+    backgroundColor: jarvisTheme.bgSurface,
+    padding: jarvisSpacing.lg,
+    borderRadius: jarvisRadius.lg,
+    borderWidth: 1,
+    borderColor: jarvisTheme.borderStrong,
+    gap: 12,
+  },
+  bannerTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  scheduleBannerTitle: {
+    color: jarvisTheme.text,
+    fontSize: 20,
+    fontWeight: "800",
+    letterSpacing: 0.3,
+  },
+  scheduleBannerSubtitle: {
+    color: jarvisTheme.textSecondary,
+    fontSize: 13,
+  },
+  bannerActionsRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  todayResetBtn: {
+    backgroundColor: "rgba(34, 211, 238, 0.15)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: jarvisRadius.pill,
+    borderWidth: 1,
+    borderColor: jarvisTheme.cyanBorder,
+  },
+  todayResetText: {
+    color: jarvisTheme.cyan,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  addTaskBtn: {
+    backgroundColor: jarvisTheme.blue,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: jarvisRadius.pill,
+  },
+  addTaskBtnText: {
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  flex1: {
+    flex: 1,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.75)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: jarvisSpacing.lg,
+  },
+  modalContent: {
+    width: "100%",
+    maxWidth: 420,
+    backgroundColor: jarvisTheme.bgSurface,
+    borderRadius: jarvisRadius.xl,
+    borderWidth: 1,
+    borderColor: jarvisTheme.borderStrong,
+    padding: jarvisSpacing.xl,
+    gap: jarvisSpacing.md,
+  },
+  modalTitle: {
+    color: jarvisTheme.text,
+    fontSize: 18,
+    fontWeight: "800",
+    marginBottom: 4,
+  },
+  modalRow: {
+    flexDirection: "row",
+    gap: jarvisSpacing.md,
+  },
+  modalLabel: {
+    color: jarvisTheme.textSecondary,
+    fontSize: 12,
+    fontWeight: "600",
+    marginBottom: 4,
+  },
+  modalInput: {
+    backgroundColor: jarvisTheme.bgElevated,
+    borderWidth: 1,
+    borderColor: jarvisTheme.border,
+    borderRadius: jarvisRadius.md,
+    paddingHorizontal: jarvisSpacing.md,
+    paddingVertical: 10,
+    color: jarvisTheme.text,
     fontSize: 14,
+  },
+  modalTextArea: {
+    minHeight: 64,
+    textAlignVertical: "top",
+  },
+  modalBtnRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: jarvisSpacing.sm,
+    marginTop: 8,
+  },
+  modalCancelBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: jarvisRadius.md,
+    borderWidth: 1,
+    borderColor: jarvisTheme.border,
+  },
+  modalCancelBtnText: {
+    color: jarvisTheme.textSecondary,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  modalSaveBtn: {
+    backgroundColor: jarvisTheme.cyan,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: jarvisRadius.md,
+  },
+  modalSaveBtnText: {
+    color: "#000000",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  dateNavRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "rgba(24, 24, 27, 0.6)",
+    padding: 6,
+    borderRadius: jarvisRadius.md,
+    borderWidth: 1,
+    borderColor: jarvisTheme.border,
+  },
+  dateNavBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: jarvisRadius.sm,
+    backgroundColor: "rgba(39, 39, 42, 0.7)",
+  },
+  dateNavBtnText: {
+    color: jarvisTheme.text,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  dateDisplayPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  dateDisplayIcon: {
+    fontSize: 14,
+  },
+  dateDisplayText: {
+    color: jarvisTheme.cyan,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  workingHoursPill: {
+    marginTop: 6,
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(34, 211, 238, 0.08)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: jarvisRadius.pill,
+    borderWidth: 1,
+    borderColor: jarvisTheme.cyanBorder,
+  },
+  workingHoursText: {
+    color: jarvisTheme.cyan,
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  slotsList: {
+    gap: jarvisSpacing.md,
+  },
+  slotCard: {
+    backgroundColor: jarvisTheme.bgElevated,
+    borderWidth: 1,
+    borderColor: jarvisTheme.borderStrong,
+    borderRadius: jarvisRadius.lg,
+    padding: jarvisSpacing.lg,
+    gap: 8,
+  },
+  slotCardAvailable: {
+    borderColor: "rgba(34, 211, 238, 0.15)",
+    backgroundColor: "rgba(24, 24, 27, 0.4)",
+  },
+  slotCardOccupied: {
+    borderColor: "rgba(139, 92, 246, 0.4)",
+    backgroundColor: "rgba(30, 27, 75, 0.35)",
+  },
+  slotCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
+  slotBadge: {
+    backgroundColor: jarvisTheme.blue,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: jarvisRadius.sm,
+  },
+  slotBadgeAvailable: {
+    backgroundColor: "rgba(34, 211, 238, 0.15)",
+    borderWidth: 1,
+    borderColor: "rgba(34, 211, 238, 0.3)",
+  },
+  slotBadgeText: {
+    color: "#ffffff",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  slotBadgeTextAvailable: {
+    color: jarvisTheme.cyan,
+  },
+  slotTimeText: {
+    color: jarvisTheme.textSecondary,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  taskStatusPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: jarvisRadius.pill,
+    borderWidth: 1,
+  },
+  statusPillBusy: {
+    backgroundColor: "rgba(239, 68, 68, 0.15)",
+    borderColor: "rgba(239, 68, 68, 0.3)",
+  },
+  statusPillFree: {
+    backgroundColor: "rgba(34, 197, 94, 0.15)",
+    borderColor: "rgba(34, 197, 94, 0.3)",
+  },
+  taskStatusText: {
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  statusTextBusy: {
+    color: "#fca5a5",
+  },
+  statusTextFree: {
+    color: "#86efac",
+  },
+  taskTitle: {
+    color: jarvisTheme.text,
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  taskDescription: {
+    color: jarvisTheme.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  locationContainer: {
+    marginTop: 2,
+  },
+  locationText: {
+    color: jarvisTheme.textMuted,
+    fontSize: 12,
+    fontWeight: "500",
   },
 });
