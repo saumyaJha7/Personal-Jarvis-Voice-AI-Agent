@@ -56,7 +56,8 @@
       "@config-plugins/react-native-webrtc",
       "@livekit/react-native-expo-plugin",
       "expo-web-browser",
-      "expo-sqlite"
+      "expo-sqlite",
+      "./plugins/with-safe-user-leave-hint.js"
     ],
     "experiments": {
       "typedRoutes": true,
